@@ -12,3 +12,11 @@ res = minimize(fun, x0, method='SLSQP', bounds=bnds, constraints=cons)  # use mi
 print(res)  # Show results
 
 # the minimized value of the function did not change when the initial guess values were varied
+#  minimized function value = 4.093023255814588
+
+
+
+
+
+
+
