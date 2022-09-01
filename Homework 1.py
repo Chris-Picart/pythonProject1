@@ -13,10 +13,3 @@ print(res)  # Show results
 
 # the minimized value of the function did not change when the initial guess values were varied
 #  minimized function value = 4.093023255814588
-
-
-
-
-
-
-
