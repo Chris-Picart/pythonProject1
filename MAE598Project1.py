@@ -179,7 +179,7 @@ class Optimize:
 
     def visualize(self):
         data = np.array([self.simulation.state_trajectory[i].detach().numpy() for i in range(self.simulation.T)])
-        y = data[:, 0]
+        y = data[:, 0]           # this section extracts all of the data to be plotted in a graph 
         y_dot = data[:, 1]
         x = data[:, 2]
         x_dot = data[:, 3]
@@ -206,7 +206,7 @@ o = Optimize(s)  # define optimizer
 o.train(30)  # solve the optimization problem
 
 
-# notes: Need to use small learning rate, .005 had best convergence. Since learning rate is small, set of time (time interval * T )
+# notes: Need to use small learning rate, .01 had best convergence. Since learning rate is small, set of time (time interval * T )
 #needs to be small or the initial loss is too large to converge in 50 iterations. Latent dimensions should be chosen based on complexity of
 #the problem. If there are too many latent dimensions, the solution will not converge since there are too many dimensions characterizing
-# the behavior of the problem. However,
+# the behavior of the problem.  
