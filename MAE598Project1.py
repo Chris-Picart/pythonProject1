@@ -12,19 +12,16 @@ import torch
 from torch.nn import utils
 import matplotlib.pyplot as plt
 
-logger = logging.getLogger(__name__)
+#logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 # environment parameters
-# values below are normalized to prevent loss from "exploding" this way reactions are minimized to keep
-FRAME_TIME = .5  # time interval
-GRAVITY_ACCEL = 9.8/1000  # gravity constant
-ROTATION_ACCEL = 9/1000  # rotation constant
-BOOST_ACCEL = 12./1000
+# values below are normalized to prevent loss from "exploding" this way reactions are minimized to allow for convergence
+# with a non zero initial value
+FRAME_TIME = .5  # time interval (s)
+GRAVITY_ACCEL = 9.8/1000  # gravity constant (km/s^2)
+ROTATION_ACCEL = 9/1000  # rotation constant rad/s^2
+BOOST_ACCEL = 12/1000 # Acceleration provided by thrust constant (km/s^2)
 
-# Notes:
-# 0. You only need to modify the "forward" function
-# 1. All variables in "forward" need to be PyTorch tensors.
-# 2. All math operations in "forward" has to be differentiable, e.g., default PyTorch functions.
-# 3. Do not use inplace operations, e.g., x += 1. Please see the following section for an example that does not work.
 
 class Dynamics(nn.Module):
 
@@ -50,12 +47,17 @@ class Dynamics(nn.Module):
         # state variables
 
         #Drag force- F = 0.5 * rho_air * v^2 * Cd * Cross-sectional Area
-        # Cross sectional area taken to = 1, density of air = 1.225kg/m^3
+        # Cross sectional area taken to = 1m^2 , density of air = 1.225kg/m^3
+        #Drag coefficient assumed to be 0.3 based on average value
+        Cd = 0.000003 # drag value significantly lowered since simulation is very large scale
+        rho = 1225000000 #kg/km^3
+        A = .000001  #km^2
 
-        # Thrust
-        # Note: Same reason as above. Need a 2-by-1 tensor.
-        # delta_dot_state = t.tensor([[0., 0.], [torch.cos(state[4]) * FRAME_TIME, 0.], [0., 0.], [-torch.sin(state[4]) * FRAME_TIME, 0.], [0., 1.]])
-        # delta2_state = t.tensor([-1 * action[0] * BOOST_ACCEL, -1 * action[1] * ROTATION_ACCEL])
+
+        sign= t.sign(state) #extract signs of state values to make sure drag force will be in opposite direction of velocity
+        delta_state_drag = t.tensor([0, sign[2] * 0.5 * rho * state[2] ** 2 * Cd * A, 0., sign[4] * 0.5 * rho * state[4] ** 2 * Cd * A, 0.])
+
+
 
        #Need to use torch. operations on the tensors
 
@@ -70,7 +72,7 @@ class Dynamics(nn.Module):
         delta_state = t.matmul(delta_dot_state, delta2_state)  # issue is probably arising from indexin state[4] here.
 
         # Update velocity
-        state = state + delta_state - delta_state_gravity
+        state = state + delta_state - delta_state_gravity - delta_state_drag# Updating velocity to update all other states below
 
         # Update state
         # Note: Same as above. Use operators on matrices/tensors as much as possible. Do not use element-wise operators as they are considered inplace.
@@ -79,7 +81,7 @@ class Dynamics(nn.Module):
                              [0., 0., 1., FRAME_TIME, 0.],
                              [0., 0., 0., 1., 0.],
                              [0., 0., 0., 0., 1.]])
-        state = t.matmul(step_mat, state)
+        state = t.matmul(step_mat, state) # yeilds updated state matrix 
 
         return state
 
@@ -100,14 +102,14 @@ class Controller(nn.Module):
         dim_hidden: up to you
         """
         super(Controller, self).__init__()
-        self.network = nn.Sequential(
-            nn.Linear(dim_input, dim_hidden),
+        self.network = nn.Sequential(  #nn.Sequential houses a list of commands and feeds an input through each command
+            nn.Linear(dim_input, dim_hidden),  # and uses the output as the input for the next commend
             nn.Sigmoid(),
-            nn.Linear(dim_hidden, dim_output),
+            nn.Linear(dim_hidden, dim_output), # nn.Linear(n,m) assigns estimated weights to values in n and returns a
+            nn.Tanh(),                       # batch that has size of m so when useing them here in nn.sequential it
+            nn.Linear(dim_output, dim_hidden), # is important to make sure m1 = n2 to prevent sizing issues
             nn.Tanh(),
-            nn.Linear(dim_output, dim_hidden),
-            nn.Tanh(),
-        )
+        ) # more layers are added to improve convergence using to better "weight" distribution
 
     def forward(self, state):
         action = self.network(state)
@@ -149,13 +151,6 @@ class Simulation(nn.Module):
         return torch.mean(state ** 2) # Using mean squared error to get loss values faster
 
 
-# set up the optimizer
-# Note:
-# 0. LBFGS is a good choice if you don't have a large batch size (i.e., a lot of initial states to consider simultaneously)
-# 1. You can also try SGD and other momentum-based methods implemented in PyTorch
-# 2. You will need to customize "visualize"
-# 3. loss.backward is where the gradient is calculated (d_loss/d_variables)
-# 4. self.optimizer.step(closure) is where gradient descent is done
 
 class Optimize:
     def __init__(self, simulation):
@@ -180,35 +175,38 @@ class Optimize:
         for epoch in range(epochs):
             loss = self.step()
             print('[%d] loss: %.3f' % (epoch + 1, loss))
-            # self.visualize()
+            self.visualize()
 
-    # def visualize(self):
-    #     data = np.array([self.simulation.state_trajectory[i].detach().numpy() for i in range(self.simulation.T)])
-    #     y = data[:, 0]
-    #     y_dot = data[:, 1]
-    #     x = data[:, 2]
-    #     x_dot = data[:, 3]
-    #     theta = data[:, 4]
-    #     plt.plot(y, label="Height", linestyle="-")
-    #     plt.plot(y_dot, label="Vertical Velocity", linestyle="--")
-    #     plt.plot(x, label="Horizontal location", linestyle="-.")
-    #     plt.plot(x_dot,  label="Horizontal velocity", linestyle=":")
-    #     plt.plot(theta, label="Orientation", linestyle=":")
-    #     plt.legend()
-    #     plt.show()
+    def visualize(self):
+        data = np.array([self.simulation.state_trajectory[i].detach().numpy() for i in range(self.simulation.T)])
+        y = data[:, 0]
+        y_dot = data[:, 1]
+        x = data[:, 2]
+        x_dot = data[:, 3]
+        theta = data[:, 4]
+        plt.plot(y, label="Height", linestyle="-")
+        plt.plot(y_dot, label="Vertical Velocity", linestyle="--")
+        plt.plot(x, label="Horizontal location", linestyle="-.")
+        plt.plot(x_dot,  label="Horizontal velocity", linestyle=":")
+        plt.plot(theta, label="Orientation", linestyle=":")
+        plt.legend()
+        plt.show()
 
 
 # Now it's time to run the code!
 
 T = 100 # number of time steps increasing T and reducing time frame leads to faster convergence but takes longer to iterate
 dim_input = 5  # state space dimensions
-dim_hidden = 10  # latent dimensions max convergence at i = 27
-dim_output = 2  # action space dimensions ;
+dim_hidden = 14  # latent dimensions
+dim_output = 2  # action space dimensions
 d = Dynamics()  # define dynamics
 c = Controller(dim_input, dim_hidden, dim_output)  # define controller
 s = Simulation(c, d, T)  # define simulation
 o = Optimize(s)  # define optimizer
-o.train(50)  # solve the optimization problem
+o.train(30)  # solve the optimization problem
+
 
 # notes: Need to use small learning rate, .005 had best convergence. Since learning rate is small, set of time (time interval * T )
-#needs to be small or the initial loss is too large to converge in 50 iterations.
+#needs to be small or the initial loss is too large to converge in 50 iterations. Latent dimensions should be chosen based on complexity of
+#the problem. If there are too many latent dimensions, the solution will not converge since there are too many dimensions characterizing
+# the behavior of the problem. However,
