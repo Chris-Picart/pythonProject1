@@ -1,0 +1,44 @@
+import numpy as np
+import time
+import torch as t
+import torch.nn as nn
+from torch import optim
+import torch
+x1 = 1
+x2 = 1
+x3 = 1
+def reducedgradientopt(x1, x2, x3):
+    iterations = 10
+    d = x1
+    s = t.tensor([x2, x3])
+    def function(d, s): # this is function being minimized
+        value = d ** 2 + s[0] ** 2 + s[1] ** 2
+        return value
+
+    def GRG(d, s): # reduced gradient of the function being minimized
+        pfpd = 2*d
+        pfps = t.tensor([2*s[0], 2*s[1]])
+        phps = t.tensor([[2*s[0]/5, 2*s[1]/25],[1, -1]])
+        phpst = t.linalg.inv(phps)
+        phpd = t.tensor([[2*d/4], [1]])
+        mult1 = t.matmul(pfps, phpst)
+        dfdd = pfpd - t.matmul(mult1, phpd)#.flatten()
+        return dfdd
+
+    def phi(a): # phi function being defined to compare function value to linear approx
+        phi = function(d, s) - (a * t * dfdd)
+        return phi
+
+    def linesearch(d, s, a):
+        ds = t.matmul(t.linalg.inv(phps), phpd, phpd.transpose())
+        while function(d - a * dfdd,s + (a * ds.transpose()) ) > phi(a): # -g(x) is step direction
+            a = 0.5*a
+        return a
+
+    while t.linalg.norm(GRG(d, s)) > 1e-3:
+        a = linesearch(d, s, a)
+        d = d - a * dfdd  #decrease x by multiplying current value and adding (alpha*step)
+        s = s + a * ds.transpose
+        k = k + 1
+
+print("final solution [x1,x2,x3]=", reducedgradientopt(x1, x2, x3))
